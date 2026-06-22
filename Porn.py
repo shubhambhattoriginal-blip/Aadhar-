@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAHDAk66BsWEZwp3tzPVt1ycmDNNxsGpiqI"
+TELEGRAM_BOT_TOKEN = "8768801941:AAFaYO7nW_Qj072DJ7-aWE0cDVzZ3EEN9O4"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = "http://rfzjfqqv-rotate:dhamh11g77te@p.webshare.io:80"
@@ -1219,10 +1219,9 @@ def handle_message(chat_id, message_text):
             send_message(
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                f"<b>◇ Step 2 of 4 — Name</b>\n\n"
-                f"▸  Enter your full name as on Aadhaar\n"
-                f"▸  Or tap <b>Skip – Use Default (Mr.)</b> to continue\n\n"
-                f"<i>◌  This name is used to unlock your PDF.</i>",
+                f"〔 Step 2 of 4 — Name 〕\n\n"
+                f"▸  Enter your full name as on Aadhaar\n\n"
+                f"◌  Unknown? Type Mr to proceed anyway.",
                 reply_markup=get_name_keyboard()
             )
         else:
