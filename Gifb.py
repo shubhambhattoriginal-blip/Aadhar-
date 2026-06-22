@@ -14,9 +14,8 @@ import PyPDF2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-# ---------- CAPTCHA SOLVER IMPORTS ----------
-import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
+# ---------- CAPTCHA SOLVER IMPORTS REMOVED ----------
+# (no more pytesseract / PIL – manual entry only)
 
 # ============== LOGGING SETUP ==============
 logging.basicConfig(
@@ -26,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAFdq5l7N_WinGsYz59wslQVon_j5K8olFE"
+TELEGRAM_BOT_TOKEN = "8768801941:AAHDAk66BsWEZwp3tzPVt1ycmDNNxsGpiqI"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = "http://rfzjfqqv-rotate:dhamh11g77te@p.webshare.io:80"
@@ -711,31 +710,8 @@ def send_document(chat_id, file_path, caption=None, filename="Aadhaar.pdf"):
         logger.error(f"Error sending document: {e}")
         return None
 
-# ============== CAPTCHA SOLVER ==============
-def solve_captcha(image_bytes):
-    try:
-        img = Image.open(BytesIO(image_bytes))
-        img = img.convert('L')
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(2.0)
-        img = img.filter(ImageFilter.SHARPEN)
-        img = img.point(lambda x: 0 if x < 128 else 255, '1')
-        custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-        text = pytesseract.image_to_string(img, config=custom_config).strip()
-        text = re.sub(r'[^A-Z0-9]', '', text.upper())
-        if len(text) >= 6:
-            return text[:6]
-        else:
-            img = Image.open(BytesIO(image_bytes)).convert('L')
-            img = img.point(lambda x: 0 if x < 140 else 255, '1')
-            text = pytesseract.image_to_string(img, config=custom_config).strip()
-            text = re.sub(r'[^A-Z0-9]', '', text.upper())
-            if len(text) >= 6:
-                return text[:6]
-            return None
-    except Exception as e:
-        logger.error(f"Captcha solving error: {e}")
-        return None
+# ============== CAPTCHA SOLVER REMOVED ==============
+# No auto-solve function; captcha is always entered manually.
 
 # ============== KEYBOARDS (no emojis) ==============
 def get_main_keyboard():
@@ -755,7 +731,7 @@ def get_cancel_keyboard():
 def get_name_keyboard():
     return {
         'inline_keyboard': [
-            [{'text': '🔍 Auto Detect (use "MR")', 'callback_data': 'name_auto'}],
+            [{'text': '➤ Skip – Use Default (Mr.)', 'callback_data': 'name_auto'}],
             [{'text': '✖ Cancel', 'callback_data': 'cancel'}]
         ]
     }
@@ -1049,18 +1025,21 @@ def handle_callback(chat_id, callback_query_id, data):
             reply_markup=get_cancel_keyboard()
         )
 
-# ============== PROCESS NAME STEP (for auto-detect) ==============
+# ============== PROCESS NAME STEP (now always manual captcha) ==============
 def process_name_step(chat_id, session_data):
     d = session_data
     name = d.get('name', 'MR').strip().upper()
     if len(name) < 2:
         name = "MR"
+
+    # Get captcha – no auto-solve, immediately ask user
     send_message(
         chat_id,
         f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-        f"<b>◇ Solving Captcha</b>\n\n"
-        f"<i>◌  Automatically solving CAPTCHA…</i>"
+        f"<b>◇ Captcha Required</b>\n\n"
+        f"<i>◌  Please wait while we load the image...</i>"
     )
+
     image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
     if not image_bytes:
         clear_session(chat_id)
@@ -1071,54 +1050,14 @@ def process_name_step(chat_id, session_data):
             f"<i>◌  Please try again.</i>"
         )
         return
-    captcha_text = None
-    for attempt in range(3):
-        if attempt > 0:
-            image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-            if not image_bytes:
-                break
-        captcha_text = solve_captcha(image_bytes)
-        if captcha_text and len(captcha_text) >= 6:
-            break
-        time.sleep(1)
-    if not captcha_text or len(captcha_text) < 6:
-        set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
-                    'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
-        send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Please type the characters shown above.</i>")
-        return
 
-    set_session(chat_id, 'sending_otp', {**d, 'name': name,
-                'captcha_code': captcha_text, 'captcha1_txn_id': captcha_txn_id,
-                'transaction_id': transaction_id})
-    send_message(
-        chat_id,
-        f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-        f"<b>◇ Sending OTP</b>\n\n"
-        f"<i>◌  Please wait…</i>"
-    )
-    sd = get_session(chat_id)['data']
-    success, result = bot.send_eid_otp(
-        chat_id, sd['mobile'], sd['name'],
-        sd['captcha_code'], sd['captcha1_txn_id'], sd['transaction_id']
-    )
-    if success:
-        set_session(chat_id, 'awaiting_otp', {**sd, 'eid_otp_txn_id': result})
-        send_message(
-            chat_id,
-            f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-            f"<b>◇ OTP Sent</b>\n\n"
-            f"▸  Enter the 6-digit OTP sent to your mobile\n\n"
-            f"<i>◌  Valid for 10 minutes</i>",
-            reply_markup=get_cancel_keyboard()
-        )
-    else:
-        clear_session(chat_id)
-        send_message(
-            chat_id,
-            f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-            f"✗  {format_otp_error(result)}\n\n"
-            f"<i>◌  Select a method below to retry.</i>"
-        )
+    # Send captcha image and ask for manual input
+    set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
+                'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
+    send_photo(chat_id, image_bytes,
+               caption=f"<b>{BOT_NAME}</b>\n{DIVIDER}\n<b>◇ Captcha</b>\n\n"
+                       f"<i>▸  Type the characters shown in the image above.</i>")
+    return
 
 # ============== OWNER COMMANDS ==============
 def handle_owner_command(chat_id, text):
@@ -1282,7 +1221,7 @@ def handle_message(chat_id, message_text):
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                 f"<b>◇ Step 2 of 4 — Name</b>\n\n"
                 f"▸  Enter your full name as on Aadhaar\n"
-                f"▸  Or tap <b>Auto Detect</b> to use 'MR'\n\n"
+                f"▸  Or tap <b>Skip – Use Default (Mr.)</b> to continue\n\n"
                 f"<i>◌  This name is used to unlock your PDF.</i>",
                 reply_markup=get_name_keyboard()
             )
@@ -1314,6 +1253,7 @@ def handle_message(chat_id, message_text):
             if success:
                 verified_name = name if name and name.strip() else "Mr."
                 set_session(chat_id, 'awaiting_pdf_otp_auto', {**d, 'eid': eid, 'verified_name': verified_name})
+                # Get captcha for PDF OTP – manual entry
                 send_message(
                     chat_id,
                     f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
@@ -1321,8 +1261,8 @@ def handle_message(chat_id, message_text):
                     f"◈  Name  ·  {verified_name}\n"
                     f"◈  EID   ·  <code>{eid}</code>\n\n"
                     f"{DIVIDER}\n"
-                    f"<b>◇ Solving Captcha for PDF</b>\n\n"
-                    f"<i>◌  Automatically solving…</i>"
+                    f"<b>◇ Captcha Required for PDF OTP</b>\n\n"
+                    f"<i>◌  Loading captcha image...</i>"
                 )
                 image_bytes2, captcha_txn_id2, transaction_id2 = bot.get_captcha(chat_id)
                 if not image_bytes2:
@@ -1334,43 +1274,11 @@ def handle_message(chat_id, message_text):
                         f"<i>◌  Please try again.</i>"
                     )
                     return
-                captcha_text2 = None
-                for attempt in range(3):
-                    if attempt > 0:
-                        image_bytes2, captcha_txn_id2, transaction_id2 = bot.get_captcha(chat_id)
-                        if not image_bytes2:
-                            break
-                    captcha_text2 = solve_captcha(image_bytes2)
-                    if captcha_text2 and len(captcha_text2) >= 6:
-                        break
-                    time.sleep(1)
-                if not captcha_text2 or len(captcha_text2) < 6:
-                    sd = get_session(chat_id)['data']
-                    set_session(chat_id, 'awaiting_captcha2', {**sd, 'captcha2_txn_id': captcha_txn_id2, 'transaction_id2': transaction_id2})
-                    send_photo(chat_id, image_bytes2, caption="<i>▸  Auto-solve failed. Please type the characters shown above.</i>")
-                    return
                 sd = get_session(chat_id)['data']
-                success2, otp_txn_id2, msg2 = bot.send_aadhaar_otp(
-                    chat_id, sd['eid'], captcha_text2, captcha_txn_id2, transaction_id2
-                )
-                if success2:
-                    set_session(chat_id, 'awaiting_pdf_otp', {**sd, 'pdf_otp_txn_id': otp_txn_id2, 'transaction_id2': transaction_id2})
-                    send_message(
-                        chat_id,
-                        f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                        f"<b>◇ OTP Sent</b>\n\n"
-                        f"▸  Enter the 6-digit OTP to download your PDF\n\n"
-                        f"<i>◌  Valid for 10 minutes</i>",
-                        reply_markup=get_cancel_keyboard()
-                    )
-                else:
-                    clear_session(chat_id)
-                    send_message(
-                        chat_id,
-                        f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                        f"✗  {format_otp_error(msg2)}\n\n"
-                        f"<i>◌  Select a method below to retry.</i>"
-                    )
+                set_session(chat_id, 'awaiting_captcha2', {**sd, 'captcha2_txn_id': captcha_txn_id2, 'transaction_id2': transaction_id2})
+                send_photo(chat_id, image_bytes2,
+                           caption=f"<b>{BOT_NAME}</b>\n{DIVIDER}\n<b>◇ Captcha</b>\n\n"
+                                   f"<i>▸  Type the characters shown in the image above.</i>")
             else:
                 clear_session(chat_id)
                 send_message(
@@ -1480,7 +1388,7 @@ def handle_message(chat_id, message_text):
                 f"<i>◌  Enter the 6-digit number (digits only).</i>"
             )
 
-    # ========== DIRECT AADHAAR / EID FLOW (with auto-captcha) ==========
+    # ========== DIRECT AADHAAR / EID FLOW (manual captcha only) ==========
     elif current_step == 'awaiting_aadhaar':
         uid = message_text.strip().replace(' ', '')
         if re.match(r'^\d{12}$', uid):
@@ -1488,8 +1396,8 @@ def handle_message(chat_id, message_text):
             send_message(
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                f"<b>◇ Solving Captcha</b>\n\n"
-                f"<i>◌  Automatically solving CAPTCHA…</i>"
+                f"<b>◇ Captcha Required</b>\n\n"
+                f"<i>◌  Loading captcha image...</i>"
             )
             sd = get_session(chat_id)['data']
             image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
@@ -1502,41 +1410,10 @@ def handle_message(chat_id, message_text):
                     f"<i>◌  Please try again.</i>"
                 )
                 return
-            captcha_text = None
-            for attempt in range(3):
-                if attempt > 0:
-                    image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-                    if not image_bytes:
-                        break
-                captcha_text = solve_captcha(image_bytes)
-                if captcha_text and len(captcha_text) >= 6:
-                    break
-                time.sleep(1)
-            if not captcha_text or len(captcha_text) < 6:
-                set_session(chat_id, 'awaiting_captcha_direct', {**sd, 'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
-                send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Please type the characters shown above.</i>")
-                return
-            success, otp_txn_id, msg = bot.send_aadhaar_otp(
-                chat_id, sd['eid'], captcha_text, captcha_txn_id, transaction_id
-            )
-            if success:
-                set_session(chat_id, 'awaiting_pdf_otp_direct', {**sd, 'pdf_otp_txn_id': otp_txn_id, 'transaction_id2': transaction_id})
-                send_message(
-                    chat_id,
-                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                    f"<b>◇ OTP Sent</b>\n\n"
-                    f"▸  Enter the 6-digit OTP to download your PDF\n\n"
-                    f"<i>◌  Valid for 10 minutes</i>",
-                    reply_markup=get_cancel_keyboard()
-                )
-            else:
-                clear_session(chat_id)
-                send_message(
-                    chat_id,
-                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                    f"✗  {format_otp_error(msg)}\n\n"
-                    f"<i>◌  Select a method below to retry.</i>"
-                )
+            set_session(chat_id, 'awaiting_captcha_direct', {**sd, 'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
+            send_photo(chat_id, image_bytes,
+                       caption=f"<b>{BOT_NAME}</b>\n{DIVIDER}\n<b>◇ Captcha</b>\n\n"
+                               f"<i>▸  Type the characters shown in the image above.</i>")
         else:
             send_message(
                 chat_id,
@@ -1552,8 +1429,8 @@ def handle_message(chat_id, message_text):
             send_message(
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                f"<b>◇ Solving Captcha</b>\n\n"
-                f"<i>◌  Automatically solving CAPTCHA…</i>"
+                f"<b>◇ Captcha Required</b>\n\n"
+                f"<i>◌  Loading captcha image...</i>"
             )
             sd = get_session(chat_id)['data']
             image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
@@ -1566,41 +1443,10 @@ def handle_message(chat_id, message_text):
                     f"<i>◌  Please try again.</i>"
                 )
                 return
-            captcha_text = None
-            for attempt in range(3):
-                if attempt > 0:
-                    image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-                    if not image_bytes:
-                        break
-                captcha_text = solve_captcha(image_bytes)
-                if captcha_text and len(captcha_text) >= 6:
-                    break
-                time.sleep(1)
-            if not captcha_text or len(captcha_text) < 6:
-                set_session(chat_id, 'awaiting_captcha_direct', {**sd, 'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
-                send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Please type the characters shown above.</i>")
-                return
-            success, otp_txn_id, msg = bot.send_aadhaar_otp(
-                chat_id, sd['eid'], captcha_text, captcha_txn_id, transaction_id
-            )
-            if success:
-                set_session(chat_id, 'awaiting_pdf_otp_direct', {**sd, 'pdf_otp_txn_id': otp_txn_id, 'transaction_id2': transaction_id})
-                send_message(
-                    chat_id,
-                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                    f"<b>◇ OTP Sent</b>\n\n"
-                    f"▸  Enter the 6-digit OTP to download your PDF\n\n"
-                    f"<i>◌  Valid for 10 minutes</i>",
-                    reply_markup=get_cancel_keyboard()
-                )
-            else:
-                clear_session(chat_id)
-                send_message(
-                    chat_id,
-                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                    f"✗  {format_otp_error(msg)}\n\n"
-                    f"<i>◌  Select a method below to retry.</i>"
-                )
+            set_session(chat_id, 'awaiting_captcha_direct', {**sd, 'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
+            send_photo(chat_id, image_bytes,
+                       caption=f"<b>{BOT_NAME}</b>\n{DIVIDER}\n<b>◇ Captcha</b>\n\n"
+                               f"<i>▸  Type the characters shown in the image above.</i>")
         else:
             send_message(
                 chat_id,
