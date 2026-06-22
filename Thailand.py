@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAHGwohXesibQDgTCHFbYF4JMZOnC8_MddA"  # <-- PUT YOUR TOKEN HERE
+TELEGRAM_BOT_TOKEN = "8768801941:AAErIerPrBQSX3aVLZRXVrEmH6zcwMWGe2o"  # <-- PUT YOUR TOKEN HERE
 
 # ============== PROXY CONFIGURATION ==============
 # Telegram proxy (unchanged)
