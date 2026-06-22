@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAF6sFUiGQa8GJnDHPDiX4FRcMy02gTqW5o"  # <-- PUT YOUR TOKEN HERE
+TELEGRAM_BOT_TOKEN = "8768801941:AAHA9GrU9syBN2w9-6vsF_U9ew1XaBsnRk4"  # <-- PUT YOUR TOKEN HERE
 
 # ============== SESSION FACTORY ==============
 def create_session(use_proxy=False, proxy_string=None):
