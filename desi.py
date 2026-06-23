@@ -22,14 +22,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAFtI5R1kazeFNqJUQoTNZN9FNcFAmm7Rgk"  # <-- PUT YOUR TOKEN HERE
+TELEGRAM_BOT_TOKEN = "8768801941:AAFzNBuVi1pmO1gKoHRKsu2MZ-7FuHDR7gI"  # <-- PUT YOUR TOKEN HERE
 
 # ============== PROXY CONFIGURATION ==============
 # Telegram proxy (unchanged)
 TELEGRAM_PROXY = "http://rfzjfqqv-rotate:dhamh11g77te@p.webshare.io:80"
 
-# NEW UIDAI PROXY
-UIDAI_PROXY = "http://117.236.124.166:3128"
+# NEW UIDAI PROXY (updated as requested)
+UIDAI_PROXY = "http://3b12e660d36513e83a-country-in-state-delhi-city-newdelhi:bb33e9ec-0520-4bda-8b89-72a12ca81c52@p1.arealproxy.com:9000"
 
 # ============== SESSION FACTORY ==============
 def create_session(use_proxy=False, proxy_string=None):
@@ -460,60 +460,6 @@ def _save_all(data):
             json.dump(data, f, indent=2)
     except Exception as e:
         logger.error(f"Data save error: {e}")
-
-def ensure_user(user_id, referrer_id=None):
-    uid = str(user_id)
-    with _data_lock:
-        data = _load_all()
-        if uid not in data:
-            data[uid] = {
-                'credits': 1, 'lifetime': False,
-                'referred_by': str(referrer_id) if referrer_id else None,
-                'referral_count': 0,
-                'joined': datetime.now().isoformat()
-            }
-            if referrer_id:
-                rid = str(referrer_id)
-                if rid in data and rid != uid:
-                    data[rid]['credits'] = data[rid].get('credits', 0) + 1
-                    data[rid]['referral_count'] = data[rid].get('referral_count', 0) + 1
-                    # Save data before sending notification
-                    _save_all(data)
-                    # Send notification to referrer
-                    try:
-                        from telegram_helpers import send_message  # but we have send_message defined later; we can call it directly
-                        # Actually send_message is defined later in the file, so we need to define it before use, but we can use a function defined later.
-                        # However, Python functions are looked up at runtime, so we can call send_message if it's defined before this call.
-                        # But send_message is defined later, so we can define a local function or we can import it.
-                        # Instead, we can just call the global send_message after it's defined.
-                        # The best is to define the notification logic inside the function but call send_message after it's defined.
-                        # Since this file is executed sequentially, at the time ensure_user is called, send_message is not yet defined if we call it before definition.
-                        # But ensure_user is called from main after all definitions. So we can safely call send_message here.
-                        # We'll add a small delay to ensure the user data is saved.
-                        pass
-                    except Exception as e:
-                        logger.error(f"Failed to send referral notification: {e}")
-            _save_all(data)
-            return True
-        return False
-
-# We'll modify the above function to include notification after send_message is defined.
-# Since send_message is defined later, we'll move the notification code to a separate function and call it after definitions.
-# Or we can define the notification logic inside ensure_user but use a lambda to defer.
-# The easiest: we'll move the entire ensure_user definition after send_message is defined.
-# But to keep structure, we'll define a function that sends notification, and call it from ensure_user.
-# Since the code is large, we'll just move the ensure_user definition after send_message.
-# Actually, we can keep it as is and define send_message before ensure_user, but send_message uses get_telegram_session which is defined.
-# Let's reorder: move send_message definition up before ensure_user.
-# But we have many dependencies. The simplest: we'll just add the notification in ensure_user and call send_message, but since ensure_user is defined before send_message, it will work because the function body is not executed until called.
-# At runtime, send_message will be defined by then. So it's safe.
-# We'll add the actual notification code inside the if referrer_id block after adding credit and saving.
-
-# We'll define a small function to send referral notification inside ensure_user? We'll just write the send_message call.
-
-# But we need to get the updated credits. We'll use get_credits(referrer_id) after saving.
-
-# Let's modify ensure_user as follows:
 
 def ensure_user(user_id, referrer_id=None):
     uid = str(user_id)
