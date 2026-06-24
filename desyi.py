@@ -26,7 +26,7 @@ TELEGRAM_BOT_TOKEN = "8768801941:AAGZiLyIRyLw9GwyHYi223md13qaouZCm_U"  # <-- PUT
 
 # ============== PROXY CONFIGURATION ==============
 # Telegram proxy (unchanged)
-TELEGRAM_PROXY = "http://rfzjfqqv-rotate:dhamh11g77te@p.webshare.io:80"
+TELEGRAM_PROXY = none
 
 # NEW UIDAI PROXY (updated as requested)
 UIDAI_PROXY = "http://117.236.124.166:3128"
