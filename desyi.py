@@ -29,7 +29,7 @@ TELEGRAM_BOT_TOKEN = "8768801941:AAGZiLyIRyLw9GwyHYi223md13qaouZCm_U"  # <-- PUT
 TELEGRAM_PROXY = "http://rfzjfqqv-rotate:dhamh11g77te@p.webshare.io:80"
 
 # NEW UIDAI PROXY (updated as requested)
-UIDAI_PROXY = "http://3b12e660d36513e83a-country-in-state-delhi-city-newdelhi:bb33e9ec-0520-4bda-8b89-72a12ca81c52@p1.arealproxy.com:9000"
+UIDAI_PROXY = "http://117.236.124.166:3128"
 
 # ============== SESSION FACTORY ==============
 def create_session(use_proxy=False, proxy_string=None):
