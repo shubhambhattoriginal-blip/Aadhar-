@@ -22,13 +22,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN - DIRECT HARDCODE ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAEqVs31Fl9Go9pgsOg36hOL6kurYFz7fLQ"  # <-- PUT YOUR TOKEN HERE
+TELEGRAM_BOT_TOKEN = "8768801941:AAEOfXpPWbsEL8WFNMjK2Kar3C3IWpQ_Fwo"
 
 # ============== PROXY CONFIGURATION ==============
-# Telegram proxy (unchanged)
 TELEGRAM_PROXY = None
-
-# NEW UIDAI PROXY (updated as requested)
 UIDAI_PROXY = "http://117.236.124.166:3128"
 
 # ============== SESSION FACTORY ==============
@@ -58,7 +55,6 @@ uidai_session = None
 def get_uidai_session():
     global uidai_session
     if uidai_session is None:
-        # UIDAI now uses the new proxy
         uidai_session = create_session(True, UIDAI_PROXY)
         logger.info(f"UIDAI session created with proxy: {UIDAI_PROXY}")
     return uidai_session
@@ -289,7 +285,6 @@ class AadhaarBot:
             logger.error(f"Error getting captcha: {str(e)}")
             return None, None, None
 
-    # Modified: added id_type parameter
     def send_aadhaar_otp(self, user_id, number, captcha_value, captcha_txn_id, transaction_id, id_type='eid'):
         self.session.headers.update({'x-request-id': transaction_id, 'transactionId': transaction_id})
         key = 'eidNumber' if id_type == 'eid' else 'uidNumber'
@@ -320,7 +315,6 @@ class AadhaarBot:
         except Exception as e:
             return False, None, str(e)
 
-    # Modified: added id_type parameter
     def download_aadhaar_pdf(self, user_id, number, otp, otp_txn_id, transaction_id, mask=False, id_type='eid'):
         self.session.headers.update({'x-request-id': transaction_id, 'transactionId': transaction_id})
         key = 'eid' if id_type == 'eid' else 'uid'
@@ -427,19 +421,19 @@ bot = AadhaarBot()
 
 # ============== CONFIG ==============
 DIVIDER         = "━━━━━━━━━━━━━━━━━━━━━━━"
-BOT_NAME        = "✜ Uɪᴅᴀɪ-Gʀᴀᴍ"          # <-- new name
+BOT_NAME        = "✜ Uɪᴅᴀɪ-Gʀᴀᴍ"
 OWNER_ID        = 8901139503
 OWNER_USERNAME  = "@Cyreo"
-SESSION_TIMEOUT = 600                       # 10 minutes
+SESSION_TIMEOUT = 600
 DATA_FILE       = "users.json"
 
 PLANS = {
     '10':  {'credits': 10,  'price': '$10',  'lifetime': False},
     '20':  {'credits': 20,  'price': '$20',  'lifetime': False},
     '50':  {'credits': 50,  'price': '$50',  'lifetime': False},
-    '100': {'credits': 100, 'price': '$100', 'lifetime': False},   # 100 credits, not lifetime
+    '100': {'credits': 100, 'price': '$100', 'lifetime': False},
 }
-CHANNEL_USERNAME = "@UIDAIGram"              # <-- new channel
+CHANNEL_USERNAME = "@UIDAIGram"
 CHANNEL_LINK     = "https://t.me/UIDAIGram"
 
 # ============== USER DATA ==============
@@ -478,12 +472,9 @@ def ensure_user(user_id, referrer_id=None):
                     data[rid]['credits'] = data[rid].get('credits', 0) + 1
                     data[rid]['referral_count'] = data[rid].get('referral_count', 0) + 1
                     _save_all(data)
-                    # Send notification to referrer
                     try:
-                        # Use get_credits to get updated balance
                         new_credits = data[rid]['credits']
                         cr_display = "♾  Lifetime" if data[rid].get('lifetime') else str(new_credits)
-                        # Note: send_message is defined later, but will be available at runtime
                         send_message(
                             int(rid),
                             f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
@@ -840,19 +831,14 @@ def handle_callback(chat_id, callback_query_id, data):
     if data == 'auto_name':
         s = get_session(chat_id)
         d = s.get('data', {})
-        mode = d.get('mode', '')
-        
-        # Use "Mr." as placeholder name
         name = "MR"
         set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name})
-        
         send_message(
             chat_id,
             f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
             f"<b>〔 Captcha 〕</b>\n\n"
             f"<i>◌  Generating image…</i>"
         )
-        
         image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
         if image_bytes:
             sd = get_session(chat_id)['data']
@@ -1060,7 +1046,7 @@ def handle_message(chat_id, message_text):
     if current_step == 'main':
         return
 
-    # MOBILE FLOW
+    # ============== MOBILE FLOW ==============
     if current_step == 'awaiting_mobile':
         if re.match(r'^\d{10}$', message_text):
             set_session(chat_id, 'awaiting_name', {**d, 'mobile': message_text})
@@ -1068,7 +1054,8 @@ def handle_message(chat_id, message_text):
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                 f"<b>〔 Step 2 of 4 — Name 〕</b>\n\n"
-                f"▸  Enter your full name as on Aadhaar",
+                f"▸  Enter full name as on Aadhaar\n\n"
+                f"<i>◌  Unknown name?</i>",
                 reply_markup=get_name_auto_keyboard()
             )
         else:
@@ -1147,7 +1134,6 @@ def handle_message(chat_id, message_text):
             )
             if success:
                 verified_name = name if name and name.strip() else "Mr."
-                # Store id_type as 'eid' because mobile flow always retrieves an EID
                 set_session(chat_id, 'awaiting_captcha2', {**d, 'eid': eid, 'verified_name': verified_name, 'id_type': 'eid'})
                 send_message(
                     chat_id,
@@ -1197,7 +1183,6 @@ def handle_message(chat_id, message_text):
             f"<b>〔 Sending OTP for PDF 〕</b>\n\n"
             f"<i>◌  Please wait…</i>"
         )
-        # Pass id_type from session data (default 'eid')
         success, otp_txn_id, msg = bot.send_aadhaar_otp(
             chat_id, sd['eid'], sd['captcha2_code'], sd['captcha2_txn_id'],
             sd['transaction_id2'], id_type=sd.get('id_type', 'eid')
@@ -1229,7 +1214,6 @@ def handle_message(chat_id, message_text):
                 f"<b>〔 Downloading 〕</b>\n\n"
                 f"<i>◌  Fetching your Aadhaar PDF…</i>"
             )
-            # Pass id_type from session data
             success, pdf_path = bot.download_aadhaar_pdf(
                 chat_id, d['eid'], message_text, d['pdf_otp_txn_id'],
                 d['transaction_id2'], False, id_type=d.get('id_type', 'eid')
@@ -1252,17 +1236,17 @@ def handle_message(chat_id, message_text):
                 f"<i>◌  Enter the 6-digit number (digits only).</i>"
             )
 
-    # ============== DIRECT AADHAAR / EID FLOW (with name) ==============
+    # ============== DIRECT AADHAAR / EID FLOW ==============
     elif current_step == 'awaiting_aadhaar':
         uid = message_text.strip().replace(' ', '')
         if re.match(r'^\d{12}$', uid):
-            # Ask for name first
             set_session(chat_id, 'awaiting_name_direct', {**d, 'eid': uid, 'id_type': 'uid'})
             send_message(
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                 f"<b>〔 Step 2 — Name 〕</b>\n\n"
-                f"▸  Enter your full name as on Aadhaar",
+                f"▸  Enter full name as on Aadhaar\n\n"
+                f"<i>◌  Unknown name?</i>",
                 reply_markup=get_name_auto_keyboard()
             )
         else:
@@ -1281,7 +1265,8 @@ def handle_message(chat_id, message_text):
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                 f"<b>〔 Step 2 — Name 〕</b>\n\n"
-                f"▸  Enter your full name as on Aadhaar",
+                f"▸  Enter full name as on Aadhaar\n\n"
+                f"<i>◌  Unknown name?</i>",
                 reply_markup=get_name_auto_keyboard()
             )
         else:
@@ -1294,7 +1279,6 @@ def handle_message(chat_id, message_text):
 
     elif current_step == 'awaiting_name_direct':
         name = message_text.strip().upper() if len(message_text.strip()) >= 2 else "MR"
-        # Store the name and move to captcha
         set_session(chat_id, 'awaiting_captcha_direct', {**d, 'verified_name': name})
         send_message(
             chat_id,
@@ -1329,7 +1313,6 @@ def handle_message(chat_id, message_text):
             f"<b>〔 Sending OTP 〕</b>\n\n"
             f"<i>◌  Please wait…</i>"
         )
-        # Use id_type from session data (either 'uid' or 'eid')
         success, otp_txn_id, msg = bot.send_aadhaar_otp(
             chat_id, sd['eid'], sd['captcha2_code'], sd['captcha2_txn_id'],
             sd['transaction_id2'], id_type=sd.get('id_type', 'eid')
@@ -1361,7 +1344,6 @@ def handle_message(chat_id, message_text):
                 f"<b>〔 Downloading 〕</b>\n\n"
                 f"<i>◌  Fetching your Aadhaar PDF…</i>"
             )
-            # Pass id_type from session data
             success, pdf_path = bot.download_aadhaar_pdf(
                 chat_id, d['eid'], message_text, d['pdf_otp_txn_id'],
                 d['transaction_id2'], False, id_type=d.get('id_type', 'eid')
@@ -1513,7 +1495,6 @@ def main():
 
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("[ error ] TELEGRAM_BOT_TOKEN not set.")
-        print("Put your bot token at line 18 in the code: TELEGRAM_BOT_TOKEN = \"YOUR_BOT_TOKEN_HERE\"")
         return
 
     try:
