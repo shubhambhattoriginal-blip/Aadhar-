@@ -443,8 +443,8 @@ PLANS = {
     '50':  {'credits': 50,  'price': '$50'},
     '100': {'credits': 100, 'price': '$100'},
 }
-CHANNEL_USERNAME = "@RAIDDEPARTMENT"
-CHANNEL_LINK     = "https://t.me/RAIDDEPARTMENT"
+CHANNEL_USERNAME = "@UIDAIGram"
+CHANNEL_LINK     = "https://t.me/UIDAIGram"
 
 # ============== USER DATA ==============
 _data_lock = threading.Lock()
