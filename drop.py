@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAH-pRetYad8LE79LSVuGdLZBlxpogG-7IQ"
+TELEGRAM_BOT_TOKEN = "8768801941:AAGwS0oPr3EFlae0bOR0B5wujGasky4Q-9I"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
@@ -66,7 +66,7 @@ def set_uidai_proxy(new_proxy):
     UIDAI_PROXY = new_proxy
     uidai_session = create_session(True, new_proxy)
     bot.session = uidai_session
-    bot.session.headers.update(bot.base_headers)      # ← fix: keep UIDAI headers after proxy change
+    bot.session.headers.update(bot.base_headers)
     logger.info(f"UIDAI proxy updated to {new_proxy}")
 
 # ============== PDF PASSWORD CRACKER ==============
@@ -478,6 +478,7 @@ def _save_codes(data):
     _save_json(CODES_FILE, data)
 
 def ensure_user(user_id, referrer_id=None):
+    """Create user if not exists, handle referral rewards"""
     uid = str(user_id)
     with _data_lock:
         data = _load_users()
@@ -488,26 +489,42 @@ def ensure_user(user_id, referrer_id=None):
                 'referral_count': 0,
                 'joined': datetime.now().isoformat()
             }
-            if referrer_id:
+            
+            # Handle referral reward
+            if referrer_id and str(referrer_id) != uid:
                 rid = str(referrer_id)
-                if rid in data and rid != uid:
+                if rid in data:
                     data[rid]['credits'] = data[rid].get('credits', 0) + 1
                     data[rid]['referral_count'] = data[rid].get('referral_count', 0) + 1
                     _save_users(data)
+                    
+                    # Send notification directly using API
                     try:
-                        send_message(
-                            int(rid),
-                            f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-                            f"<b>〔 Referral Reward 〕</b>\n\n"
-                            f"◈  New user joined via your link!\n"
-                            f"◈  You earned +1 credit.\n"
-                            f"◈  Total credits: {data[rid]['credits']}\n\n"
-                            f"{DIVIDER}"
-                        )
+                        notif_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                        notif_data = {
+                            'chat_id': int(rid),
+                            'text': (
+                                f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
+                                f"<b>〔 Referral Reward 〕</b>\n\n"
+                                f"◈  New user joined via your link!\n"
+                                f"◈  You earned +1 credit.\n"
+                                f"◈  Total credits: {data[rid]['credits']}\n\n"
+                                f"{DIVIDER}"
+                            ),
+                            'parse_mode': 'HTML'
+                        }
+                        get_telegram_session().post(notif_url, json=notif_data, timeout=10)
+                        logger.info(f"Referral notification sent to {rid} for new user {uid}")
                     except Exception as e:
-                        logger.error(f"Failed to send referral notification: {e}")
-            _save_users(data)
+                        logger.error(f"Failed to send referral notification to {rid}: {e}")
+                else:
+                    _save_users(data)
+            else:
+                _save_users(data)
+            logger.info(f"New user created: {uid}" + (f" (referred by {referrer_id})" if referrer_id else ""))
             return True
+        
+        logger.info(f"Existing user: {uid}")
         return False
 
 # ============== TELEGRAM HELPERS ==============
@@ -1453,6 +1470,10 @@ def main():
                             except ValueError:
                                 pass
 
+                        # FIXED: Create user FIRST before channel check
+                        ensure_user(cid, referrer_id)
+                        clear_session(cid)
+
                         if not is_channel_member(cid):
                             send_message(
                                 cid,
@@ -1465,8 +1486,6 @@ def main():
                             )
                             continue
 
-                        ensure_user(cid, referrer_id)
-                        clear_session(cid)
                         cr = get_credits(cid)
                         send_message(
                             cid,
