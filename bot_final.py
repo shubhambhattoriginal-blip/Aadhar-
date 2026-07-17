@@ -47,7 +47,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAE3FTYxUrLTM0oI13msYYtQzZNvh8K8VLU"
+TELEGRAM_BOT_TOKEN = "8768801941:AAHnfyd9LZCcv3wkOwlfboot2Rflo98YJLg"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
