@@ -1,8 +1,0 @@
-requests
-PyPDF2
-ddddocr
-pillow
-numpy
-opencv-python-headless
-onnxruntime
-pytesseract
