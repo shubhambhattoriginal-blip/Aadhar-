@@ -1,3 +1,4 @@
+
 import requests
 import json
 import base64
@@ -24,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAGwS0oPr3EFlae0bOR0B5wujGasky4Q-9I"
+TELEGRAM_BOT_TOKEN = "8768801941:AAEFBgtUtuEGjHu7xukRbaOrZ582ym3saEM"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
@@ -423,10 +424,206 @@ class AadhaarBot:
         success, password, decrypted_path = self.cracker.crack_pdf(pdf_path, name, progress_callback)
         return success, password, decrypted_path, None
 
+    def auto_solve_captcha(self, image_bytes):
+        """Triple-engine captcha solver: ddddocr (normal+beta) + pytesseract.
+        8 preprocessing strategies × 3 engines = up to 24 votes. Majority wins."""
+        try:
+            import ddddocr
+            import pytesseract
+            from PIL import Image, ImageEnhance, ImageOps, ImageFilter
+            from collections import Counter
+            import io
+
+            ocr_main = ddddocr.DdddOcr(show_ad=False)
+            try:
+                ocr_beta = ddddocr.DdddOcr(show_ad=False, beta=True)
+            except Exception:
+                ocr_beta = None
+
+            original = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+            votes = []
+
+            # Tesseract configs tuned for short alphanumeric captchas
+            tess_configs = [
+                '--psm 8 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+                '--psm 7 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+                '--psm 6 --oem 3',
+            ]
+
+            def _tess(img):
+                for cfg in tess_configs:
+                    try:
+                        r = pytesseract.image_to_string(img, config=cfg).strip().replace(' ', '').replace('\n', '')
+                        if r and len(r) >= 4:
+                            votes.append(r)
+                    except Exception:
+                        pass
+
+            def _classify(img):
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                b = buf.getvalue()
+                try:
+                    r = ocr_main.classification(b).strip()
+                    if r: votes.append(r)
+                except Exception: pass
+                if ocr_beta:
+                    try:
+                        r2 = ocr_beta.classification(b).strip()
+                        if r2: votes.append(r2)
+                    except Exception: pass
+                _tess(img)
+
+            # S1: original
+            _classify(original)
+
+            # S2: grayscale high-contrast
+            g = original.convert('L')
+            _classify(ImageEnhance.Contrast(g).enhance(3.5))
+
+            # S3: binary threshold 128
+            g2 = original.convert('L')
+            _classify(g2.point(lambda x: 0 if x < 128 else 255, '1').convert('L'))
+
+            # S4: binary threshold 160
+            g3 = original.convert('L')
+            _classify(g3.point(lambda x: 0 if x < 160 else 255, '1').convert('L'))
+
+            # S5: sharpen + contrast
+            sh = ImageEnhance.Sharpness(original.convert('L')).enhance(5.0)
+            _classify(ImageEnhance.Contrast(sh).enhance(2.5))
+
+            # S6: invert + contrast
+            inv = ImageOps.invert(original.convert('L'))
+            _classify(ImageEnhance.Contrast(inv).enhance(2.0))
+
+            # S7: 2× upscale + threshold
+            big = original.convert('L').resize(
+                (original.width * 2, original.height * 2), Image.LANCZOS
+            )
+            _classify(big.point(lambda x: 0 if x < 140 else 255, '1').convert('L'))
+
+            # S8: median denoise + threshold
+            med = original.convert('L').filter(ImageFilter.MedianFilter(size=3))
+            _classify(med.point(lambda x: 0 if x < 145 else 255, '1').convert('L'))
+
+            if not votes:
+                return None
+
+            best, cnt = Counter(votes).most_common(1)[0]
+            logger.info(f"Captcha solved: '{best}' votes={cnt}/{len(votes)} all={Counter(votes).most_common()}")
+            return best or None
+
+        except Exception as e:
+            logger.error(f"Auto-captcha solve error: {e}")
+            return None
+
+    def fetch_and_auto_solve_captcha(self, chat_id, max_retries=15):
+        """Fetch fresh captcha on every retry. 15 attempts, triple-engine solver.
+        Returns solved_text=None only if all 15 attempts fail (extremely rare)."""
+        last_img = last_txn = last_tid = None
+        for attempt in range(max_retries):
+            image_bytes, captcha_txn_id, transaction_id = self.get_captcha(chat_id)
+            if not image_bytes:
+                logger.warning(f"Captcha fetch failed {attempt+1}/{max_retries}")
+                time.sleep(0.4)
+                continue
+            last_img, last_txn, last_tid = image_bytes, captcha_txn_id, transaction_id
+            solved = self.auto_solve_captcha(image_bytes)
+            if solved and len(solved) >= 4:
+                return image_bytes, captcha_txn_id, transaction_id, solved
+            logger.warning(f"Weak result '{solved}' attempt {attempt+1}/{max_retries}, fresh captcha")
+            time.sleep(0.25)
+        return last_img, last_txn, last_tid, None
+
 # ============================================================
 # Initialize bot
 # ============================================================
 bot = AadhaarBot()
+
+# ============== AUTO CAPTCHA HELPERS ==============
+
+def auto_send_eid_otp(chat_id, mobile, name, d):
+    """Silently auto-solve captcha and send EID OTP.
+    If user's name yields no records, retry with 'MR' (invisible to user).
+    Falls back to manual captcha image only when auto-solve is completely stuck."""
+    names_to_try = [name] if name and name != 'MR' else ['MR']
+    if 'MR' not in names_to_try:
+        names_to_try.append('MR')
+
+    last_img = last_txn = last_tid = None
+
+    for try_name in names_to_try:
+        for attempt in range(10):
+            image_bytes, captcha_txn_id, transaction_id, solved = bot.fetch_and_auto_solve_captcha(chat_id)
+            if not image_bytes:
+                time.sleep(0.4)
+                continue
+            last_img, last_txn, last_tid = image_bytes, captcha_txn_id, transaction_id
+            if not solved:
+                # OCR totally stuck – show manual
+                return False, (image_bytes, captcha_txn_id, transaction_id)
+            success, result = bot.send_eid_otp(chat_id, mobile, try_name, solved, captcha_txn_id, transaction_id)
+            if success:
+                sd = {**d, 'name': try_name, 'captcha_code': solved,
+                      'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id,
+                      'eid_otp_txn_id': result}
+                return True, sd
+            err = str(result).lower()
+            if any(k in err for k in ('captcha', 'invalid', 'wrong', 'mismatch')):
+                logger.warning(f"Captcha wrong '{solved}' attempt {attempt+1}, retrying")
+                time.sleep(0.4)
+                continue
+            # Any other error (no records, etc.) — break inner loop, try next name
+            logger.warning(f"EID OTP with name '{try_name}' failed: {result}")
+            break
+        # finished 10 attempts or broke early
+
+    # All name variants exhausted — manual fallback
+    if last_img:
+        return False, (last_img, last_txn, last_tid)
+    img, txn, tid = bot.get_captcha(chat_id)
+    return False, (img, txn, tid)
+
+
+def auto_send_aadhaar_otp(chat_id, eid, id_type, d):
+    """Silently auto-solve captcha and send Aadhaar PDF OTP.
+    Shows 'Sending second OTP' message then fires silently.
+    Falls back to manual captcha image only when completely stuck."""
+    send_message(chat_id,
+        f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
+        f"<b>〔 Sending Second OTP 〕</b>\n\n"
+        f"<i>◌  Please wait…</i>"
+    )
+    last_img = last_txn = last_tid = None
+
+    for attempt in range(10):
+        image_bytes, captcha_txn_id, transaction_id, solved = bot.fetch_and_auto_solve_captcha(chat_id)
+        if not image_bytes:
+            time.sleep(0.4)
+            continue
+        last_img, last_txn, last_tid = image_bytes, captcha_txn_id, transaction_id
+        if not solved:
+            return False, (image_bytes, captcha_txn_id, transaction_id)
+        success, otp_txn_id, msg = bot.send_aadhaar_otp(
+            chat_id, eid, solved, captcha_txn_id, transaction_id, id_type=id_type
+        )
+        if success:
+            sd = {**d, 'captcha2_code': solved, 'captcha2_txn_id': captcha_txn_id,
+                  'transaction_id2': transaction_id, 'pdf_otp_txn_id': otp_txn_id}
+            return True, sd
+        err = str(msg).lower()
+        if any(k in err for k in ('captcha', 'invalid', 'wrong', 'mismatch')):
+            logger.warning(f"Aadhaar captcha wrong '{solved}' attempt {attempt+1}: {msg}")
+            time.sleep(0.4)
+            continue
+        logger.warning(f"Aadhaar OTP failed (non-captcha): {msg}")
+        break
+
+    if last_img:
+        return False, (last_img, last_txn, last_tid)
+    img, txn, tid = bot.get_captcha(chat_id)
+    return False, (img, txn, tid)
 
 # ============== CONFIG ==============
 DIVIDER         = "━━━━━━━━━━━━━━━━━━━━━━━"
@@ -838,14 +1035,19 @@ def handle_callback(chat_id, callback_query_id, data):
         s = get_session(chat_id)
         d = s.get('data', {})
         name = "MR"
-        image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-        if image_bytes:
-            set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
-                        'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
-            send_photo(chat_id, image_bytes, caption="<i>▸  Type the characters shown above</i>")
+        ok, result = auto_send_eid_otp(chat_id, d.get('mobile', ''), name, d)
+        if ok:
+            set_session(chat_id, 'awaiting_otp', result)
+            send_message(chat_id, f"<b>〔 OTP Sent  ✓ 〕</b>\n\n▸  Enter the 6-digit OTP\n\n<i>◌  Valid for 10 minutes</i>", reply_markup=get_cancel_keyboard())
         else:
-            clear_session(chat_id)
-            send_message(chat_id, f"✗  Captcha service unavailable.")
+            image_bytes, captcha_txn_id, transaction_id = result if result else (None, None, None)
+            if image_bytes:
+                set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
+                            'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
+                send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Type the captcha manually:</i>")
+            else:
+                clear_session(chat_id)
+                send_message(chat_id, f"✗  Captcha service unavailable.")
         return
 
     if data in ('search_mobile', 'search_aadhaar', 'search_eid'):
@@ -892,6 +1094,51 @@ def handle_owner_command(chat_id, text):
     cmd = parts[0].lower()
 
     if cmd == '/send' and len(parts) == 3:
+        # /send all AMOUNT  — broadcast to every user
+        if parts[1].lower() == 'all':
+            try:
+                amount = int(parts[2])
+                if amount <= 0:
+                    send_message(chat_id, f"{BOT_NAME}\n{DIVIDER}\n✗  Amount must be positive.")
+                    return True
+                data = _load_users()
+                total = len(data)
+                send_message(chat_id,
+                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
+                    f"<b>〔 Broadcasting Credits 〕</b>\n\n"
+                    f"◈  Amount  ·  {amount} credits\n"
+                    f"◈  Users   ·  {total}\n\n"
+                    f"<i>◌  Sending… please wait.</i>"
+                )
+                ok = fail = 0
+                for uid_str in list(data.keys()):
+                    try:
+                        add_credits(int(uid_str), amount)
+                        send_message(int(uid_str),
+                            f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
+                            f"<b>〔 Credits Received  ✓ 〕</b>\n\n"
+                            f"◈  Credited  ·  +{amount}\n"
+                            f"◈  Balance   ·  {get_credits(int(uid_str))}\n\n"
+                            f"{DIVIDER}",
+                            reply_markup=get_main_keyboard()
+                        )
+                        ok += 1
+                    except Exception as ex:
+                        logger.warning(f"Broadcast failed for {uid_str}: {ex}")
+                        fail += 1
+                    time.sleep(0.05)   # rate-limit friendly
+                send_message(chat_id,
+                    f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
+                    f"<b>〔 Broadcast Complete  ✓ 〕</b>\n\n"
+                    f"◈  Sent     ·  {ok}\n"
+                    f"◈  Failed   ·  {fail}\n"
+                    f"◈  Amount   ·  {amount} credits each\n\n"
+                    f"{DIVIDER}"
+                )
+            except ValueError:
+                send_message(chat_id, f"{BOT_NAME}\n{DIVIDER}\n✗  Usage: /send all AMOUNT")
+            return True
+        # /send USERID AMOUNT
         try:
             target_id = int(parts[1])
             amount = int(parts[2])
@@ -1090,14 +1337,14 @@ def handle_message(chat_id, message_text):
     d = s.get('data', {})
 
     if current_step != 'main':
-        idle = time.time() - s.get('last_activity', time.time())
-        if idle > SESSION_TIMEOUT:
+        age = time.time() - s.get('created_at', time.time())
+        if age > SESSION_TIMEOUT:
             clear_session(chat_id)
             send_message(
                 chat_id,
                 f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                 f"<b>〔 Session Expired 〕</b>\n\n"
-                f"◈  Reason   ·  Idle for 10 minutes\n"
+                f"◈  Reason   ·  10-minute session limit reached\n"
                 f"◈  Credits  ·  Not deducted\n\n"
                 f"{DIVIDER}\n"
                 f"<i>◌  Select a method below to start a new session.</i>"
@@ -1131,14 +1378,19 @@ def handle_message(chat_id, message_text):
 
     elif current_step == 'awaiting_name':
         name = message_text.strip().upper() if len(message_text.strip()) >= 2 else "MR"
-        image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-        if image_bytes:
-            set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
-                        'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
-            send_photo(chat_id, image_bytes, caption="<i>▸  Type the characters shown above</i>")
+        ok, result = auto_send_eid_otp(chat_id, d.get('mobile', ''), name, d)
+        if ok:
+            set_session(chat_id, 'awaiting_otp', result)
+            send_message(chat_id, f"<b>〔 OTP Sent  ✓ 〕</b>\n\n▸  Enter the 6-digit OTP\n\n<i>◌  Valid for 10 minutes</i>", reply_markup=get_cancel_keyboard())
         else:
-            clear_session(chat_id)
-            send_message(chat_id, f"✗  Captcha service unavailable.")
+            image_bytes, captcha_txn_id, transaction_id = result if result else (None, None, None)
+            if image_bytes:
+                set_session(chat_id, 'awaiting_captcha1', {**d, 'name': name,
+                            'captcha1_txn_id': captcha_txn_id, 'transaction_id': transaction_id})
+                send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Type the captcha manually:</i>")
+            else:
+                clear_session(chat_id)
+                send_message(chat_id, f"✗  Captcha service unavailable.")
 
     elif current_step == 'awaiting_captcha1':
         set_session(chat_id, 'sending_otp', {**d, 'captcha_code': message_text.strip()})
@@ -1164,24 +1416,27 @@ def handle_message(chat_id, message_text):
             )
             if success:
                 verified_name = name if name and name.strip() else "Mr."
-                set_session(chat_id, 'awaiting_captcha2', {**d, 'eid': eid, 'verified_name': verified_name, 'id_type': 'eid'})
                 send_message(chat_id,
                     f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                     f"<b>〔 Identity Verified  ✓ 〕</b>\n\n"
                     f"◈  Name  ·  {verified_name}\n"
                     f"◈  EID   ·  <code>{eid}</code>\n\n"
-                    f"{DIVIDER}\n"
-                    f"<b>〔 Captcha for PDF 〕</b>\n\n"
-                    f"<i>◌  One more step to download…</i>"
+                    f"{DIVIDER}"
                 )
-                image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-                if image_bytes:
-                    set_session(chat_id, 'awaiting_captcha2', {**d, 'eid': eid, 'verified_name': verified_name, 'id_type': 'eid',
-                                'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
-                    send_photo(chat_id, image_bytes, caption="<i>▸  Type the characters shown above</i>")
+                base_d = {**d, 'eid': eid, 'verified_name': verified_name, 'id_type': 'eid'}
+                ok2, result2 = auto_send_aadhaar_otp(chat_id, eid, 'eid', base_d)
+                if ok2:
+                    set_session(chat_id, 'awaiting_pdf_otp', result2)
+                    send_message(chat_id, f"<b>〔 OTP Sent  ✓ 〕</b>\n\n▸  Enter the 6-digit OTP\n\n<i>◌  Valid for 10 minutes</i>", reply_markup=get_cancel_keyboard())
                 else:
-                    clear_session(chat_id)
-                    send_message(chat_id, f"✗  Captcha unavailable.")
+                    image_bytes, captcha_txn_id, transaction_id = result2 if result2 else (None, None, None)
+                    if image_bytes:
+                        set_session(chat_id, 'awaiting_captcha2', {**base_d,
+                                    'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
+                        send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Type the captcha manually:</i>")
+                    else:
+                        clear_session(chat_id)
+                        send_message(chat_id, f"✗  Captcha unavailable.")
             else:
                 clear_session(chat_id)
                 send_message(chat_id, f"✗  Verification failed — {eid}\n\n<i>◌  Select a method below to retry.</i>")
@@ -1247,15 +1502,20 @@ def handle_message(chat_id, message_text):
 
     elif current_step == 'awaiting_name_direct':
         name = message_text.strip().upper() if len(message_text.strip()) >= 2 else "MR"
-        set_session(chat_id, 'awaiting_captcha_direct', {**d, 'verified_name': name})
-        image_bytes, captcha_txn_id, transaction_id = bot.get_captcha(chat_id)
-        if image_bytes:
-            set_session(chat_id, 'awaiting_captcha_direct', {**d, 'verified_name': name,
-                        'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
-            send_photo(chat_id, image_bytes, caption="<i>▸  Type the characters shown above</i>")
+        base_d = {**d, 'verified_name': name}
+        ok, result = auto_send_aadhaar_otp(chat_id, d.get('eid', ''), d.get('id_type', 'eid'), base_d)
+        if ok:
+            set_session(chat_id, 'awaiting_pdf_otp_direct', result)
+            send_message(chat_id, f"<b>〔 OTP Sent  ✓ 〕</b>\n\n▸  Enter the 6-digit OTP\n\n<i>◌  Valid for 10 minutes</i>", reply_markup=get_cancel_keyboard())
         else:
-            clear_session(chat_id)
-            send_message(chat_id, f"✗  Captcha unavailable.")
+            image_bytes, captcha_txn_id, transaction_id = result if result else (None, None, None)
+            if image_bytes:
+                set_session(chat_id, 'awaiting_captcha_direct', {**base_d,
+                            'captcha2_txn_id': captcha_txn_id, 'transaction_id2': transaction_id})
+                send_photo(chat_id, image_bytes, caption="<i>▸  Auto-solve failed. Type the captcha manually:</i>")
+            else:
+                clear_session(chat_id)
+                send_message(chat_id, f"✗  Captcha unavailable.")
 
     elif current_step == 'awaiting_captcha_direct':
         sd = {**d, 'captcha2_code': message_text.strip()}
@@ -1306,27 +1566,28 @@ def get_updates(offset=None):
         return []
 
 # ============== SESSION MANAGEMENT ==============
+# Sessions use an ABSOLUTE 10-minute timeout from creation — activity does NOT reset the clock.
 user_sessions   = {}
 _sessions_lock  = threading.Lock()
 
 def get_session(chat_id):
     with _sessions_lock:
-        return user_sessions.get(chat_id, {'step': 'main', 'data': {}, 'last_activity': time.time()})
+        return user_sessions.get(chat_id, {'step': 'main', 'data': {}, 'created_at': time.time()})
 
 def set_session(chat_id, step, data=None):
     with _sessions_lock:
         existing = user_sessions.get(chat_id, {})
         d = data if data is not None else existing.get('data', {})
-        user_sessions[chat_id] = {'step': step, 'data': d, 'last_activity': time.time()}
+        # Preserve the original created_at so the 10-min clock isn't reset on each step update
+        created_at = existing.get('created_at', time.time()) if existing.get('step', 'main') != 'main' else time.time()
+        user_sessions[chat_id] = {'step': step, 'data': d, 'created_at': created_at}
 
 def clear_session(chat_id):
     with _sessions_lock:
-        user_sessions[chat_id] = {'step': 'main', 'data': {}, 'last_activity': time.time()}
+        user_sessions[chat_id] = {'step': 'main', 'data': {}, 'created_at': time.time()}
 
 def touch_session(chat_id):
-    with _sessions_lock:
-        if chat_id in user_sessions:
-            user_sessions[chat_id]['last_activity'] = time.time()
+    pass  # no-op: absolute timeout — activity doesn't extend the session
 
 def _cleanup_sessions():
     while True:
@@ -1336,16 +1597,16 @@ def _cleanup_sessions():
             with _sessions_lock:
                 for cid, s in list(user_sessions.items()):
                     if s.get('step', 'main') != 'main':
-                        idle = time.time() - s.get('last_activity', time.time())
-                        if idle > SESSION_TIMEOUT:
-                            user_sessions[cid] = {'step': 'main', 'data': {}, 'last_activity': time.time()}
+                        age = time.time() - s.get('created_at', time.time())
+                        if age > SESSION_TIMEOUT:
+                            user_sessions[cid] = {'step': 'main', 'data': {}, 'created_at': time.time()}
                             expired.append(cid)
             for cid in expired:
                 try:
                     send_message(cid,
                         f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
                         f"<b>〔 Session Expired 〕</b>\n\n"
-                        f"◈  Reason   ·  Idle for 10 minutes\n"
+                        f"◈  Reason   ·  10-minute session limit reached\n"
                         f"◈  Credits  ·  Not deducted\n\n"
                         f"{DIVIDER}\n"
                         f"<i>◌  Select a method below to start again.</i>",
