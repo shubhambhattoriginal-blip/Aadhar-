@@ -1,4 +1,3 @@
-
 import requests
 import json
 import base64
@@ -47,7 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAH40h-AWQRdnrcFNZ_angPNxbr5f9UzRSE"
+TELEGRAM_BOT_TOKEN = "8768801941:AAFFs8wCeDWxy4MB62ZG6pjInSh05Mv9S70"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
