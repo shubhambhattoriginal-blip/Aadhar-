@@ -1,4 +1,4 @@
-import requests
+Import requests
 import json
 import base64
 import uuid
@@ -46,7 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAFFs8wCeDWxy4MB62ZG6pjInSh05Mv9S70"
+TELEGRAM_BOT_TOKEN = "8768801941:AAEN1Lwfg3Xg12mWPJBhz_QfJ1nxpKthF2U"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
@@ -631,7 +631,7 @@ def auto_send_aadhaar_otp(chat_id, eid, id_type, d):
     """
     send_message(chat_id,
         f"<b>{BOT_NAME}</b>\n{DIVIDER}\n"
-        f"<b>〔 Sending Second OTP 〕</b>\n\n"
+        f"<b>〔 Sending OTP 〕</b>\n\n"
         f"<i>◌  Please wait…</i>"
     )
     last_img = last_txn = last_tid = None
