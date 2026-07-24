@@ -46,11 +46,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============== BOT TOKEN ==============
-TELEGRAM_BOT_TOKEN = "8768801941:AAFNIu1lxOTW1jLnh3XVJrmGUfnCtEFGeR8"
+TELEGRAM_BOT_TOKEN = "8768801941:AAFA19gM5YQYZyA4tUFBeeVIy6FHYTAySYc"
 
 # ============== PROXY CONFIGURATION ==============
 TELEGRAM_PROXY = None
-UIDAI_PROXY = "http://103.151.17.209:8080"   # working default; can be changed via /ip
+UIDAI_PROXY = "http://117.236.124.166:3128"   # working default; can be changed via /ip
 
 # ============== SESSION FACTORY ==============
 def create_session(use_proxy=False, proxy_string=None):
